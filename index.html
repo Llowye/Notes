@@ -1,0 +1,155 @@
+
+<?php
+// ===== BAGIAN 1: DATA (struktur data ARRAY) =====
+// Semua tugas disimpan dalam satu array. Tiap tugas = array kecil berisi teks & status.
+// Contoh: [ ["teks"=>"Belajar","selesai"=>false], ["teks"=>"Mandi","selesai"=>true] ]
+$file  = "tugas.json";
+$tugas = file_exists($file) ? json_decode(file_get_contents($file), true) : [];
+
+function simpan($file, $tugas) {
+    file_put_contents($file, json_encode(array_values($tugas)));
+}
+
+// ===== BAGIAN 2: PROSES AKSI (tambah / ubah / hapus) =====
+if ($_SERVER["REQUEST_METHOD"] === "POST") {
+    $aksi = $_POST["aksi"] ?? "";
+    // filter_var mengembalikan false kalau BUKAN angka (lebih aman dari (int))
+    $id = filter_var($_POST["id"] ?? "", FILTER_VALIDATE_INT);
+    $idAda = ($id !== false && isset($tugas[$id])); // id valid & ada di array?
+
+    if ($aksi === "tambah") {
+        $teks = trim($_POST["teks"] ?? "");
+        if ($teks !== "") $tugas[] = ["teks" => $teks, "selesai" => false]; // tambah di ujung array
+    } elseif ($aksi === "ubah" && $idAda) {
+        $tugas[$id]["selesai"] = !$tugas[$id]["selesai"];  // balik true/false
+    } elseif ($aksi === "hapus" && $idAda) {
+        unset($tugas[$id]);                                // buang dari array
+    }
+    simpan($file, $tugas);
+    // Kembali ke halaman yang sama, pencarian & urutan tetap terjaga
+    header("Location: index.php?" . ($_SERVER["QUERY_STRING"] ?? ""));
+    exit;
+}
+
+// ===== BAGIAN 3: SEARCHING (pencarian) =====
+$cari = trim($_GET["cari"] ?? "");
+$pilihan = ["lama" => "Terlama dulu", "baru" => "Terbaru dulu", "az" => "A → Z",
+            "za" => "Z → A", "belum" => "Belum selesai dulu"];
+$urut = $_GET["urut"] ?? "lama";
+if (!array_key_exists($urut, $pilihan)) $urut = "lama";   // tolak nilai aneh
+
+// LINEAR SEARCH: cek tugas satu per satu dari awal sampai akhir.
+// Yang cocok disalin ke array baru $hasil. "id" menyimpan posisi ASLI di array $tugas,
+// supaya setelah diurutkan, tombol centang/hapus tetap menunjuk tugas yang benar.
+$hasil = [];
+foreach ($tugas as $i => $t) {                            // TRAVERSAL #1: foreach
+    if ($cari === "" || stripos($t["teks"], $cari) !== false) {  // stripos = cari teks (tak peduli besar/kecil)
+        $hasil[] = ["id" => $i, "teks" => $t["teks"], "selesai" => $t["selesai"]];
+    }
+}
+
+// ===== BAGIAN 4: SORTING (pengurutan) dengan BUBBLE SORT =====
+// Aturan: apakah A harus berada SETELAH B? (true = tukar posisi)
+function harusTukar($a, $b, $urut) {
+    if ($urut === "az")    return strcasecmp($a["teks"], $b["teks"]) > 0;
+    if ($urut === "za")    return strcasecmp($a["teks"], $b["teks"]) < 0;
+    if ($urut === "belum") return $a["selesai"] && !$b["selesai"];
+    if ($urut === "baru")  return $a["id"] < $b["id"];
+    return $a["id"] > $b["id"];                           // "lama"
+}
+
+function urutkan($arr, $urut) {
+    $n = count($arr);
+    for ($i = 0; $i < $n - 1; $i++) {                     // ulangi sebanyak n-1 putaran
+        for ($j = 0; $j < $n - $i - 1; $j++) {            // bandingkan pasangan bertetangga
+            if (harusTukar($arr[$j], $arr[$j + 1], $urut)) {
+                $sementara   = $arr[$j];                  // tukar posisi lewat variabel sementara
+                $arr[$j]     = $arr[$j + 1];
+                $arr[$j + 1] = $sementara;
+            }
+        }
+    }
+    return $arr;
+}
+$hasil = urutkan($hasil, $urut);
+
+// ===== BAGIAN 5: TRAVERSAL #2 - menghitung statistik =====
+$selesai = 0;
+foreach ($tugas as $t) { if ($t["selesai"]) $selesai++; }  // telusuri semua, hitung yang selesai
+?>
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>To-Do List Array</title>
+  <style>
+    body { font-family: sans-serif; background: #f0f2f5; display: flex; justify-content: center; padding: 20px; }
+    .app { background: white; width: 100%; max-width: 440px; padding: 20px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,.1); }
+    h1 { margin-top: 0; text-align: center; }
+    .baris { display: flex; gap: 8px; margin-bottom: 8px; }
+    input[type=text], select { flex: 1; padding: 10px; border: 1px solid #ccc; border-radius: 8px; font-size: 16px; min-width: 0; }
+    button { padding: 10px 14px; border: none; border-radius: 8px; background: #4f46e5; color: white; font-size: 16px; cursor: pointer; }
+    ul { list-style: none; padding: 0; }
+    li { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid #eee; }
+    li form { margin: 0; }
+    li form:first-child { flex: 1; }
+    .no { color: #999; width: 22px; }
+    .teks { display: flex; align-items: center; gap: 8px; background: none; color: #222; padding: 0; text-align: left; width: 100%; }
+    .kotak { font-size: 24px; color: #4f46e5; }
+    li.selesai .teks { text-decoration: line-through; color: #999; }
+    .hapus { background: #ef4444; padding: 4px 10px; }
+    .info { text-align: center; color: #666; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <h1>📝 To-Do List Array</h1>
+
+    <!-- Form TAMBAH (method post = mengubah data) -->
+    <form method="post" class="baris">
+      <input type="hidden" name="aksi" value="tambah">
+      <input type="text" name="teks" placeholder="Tulis tugas baru..." required>
+      <button>Tambah</button>
+    </form>
+
+    <!-- Form CARI + URUT (method get = hanya melihat, tidak mengubah data) -->
+    <form method="get" class="baris">
+      <input type="text" name="cari" placeholder="🔍 Cari tugas..." value="<?= htmlspecialchars($cari) ?>">
+      <select name="urut">
+        <?php foreach ($pilihan as $kode => $nama): ?>
+          <option value="<?= $kode ?>" <?= $kode === $urut ? "selected" : "" ?>><?= $nama ?></option>
+        <?php endforeach; ?>
+      </select>
+      <button>OK</button>
+    </form>
+
+    <ul>
+      <!-- TRAVERSAL #3: for dengan indeks, menampilkan array $hasil dari 0 sampai akhir -->
+      <?php for ($i = 0; $i < count($hasil); $i++): $t = $hasil[$i]; ?>
+        <li class="<?= $t["selesai"] ? "selesai" : "" ?>">
+          <span class="no"><?= $i + 1 ?>.</span>
+          <form method="post">
+            <input type="hidden" name="aksi" value="ubah">
+            <input type="hidden" name="id" value="<?= $t["id"] ?>">
+            <button class="teks"><span class="kotak"><?= $t["selesai"] ? "☑" : "☐" ?></span>
+              <?= htmlspecialchars($t["teks"]) ?></button>
+          </form>
+          <form method="post">
+            <input type="hidden" name="aksi" value="hapus">
+            <input type="hidden" name="id" value="<?= $t["id"] ?>">
+            <button class="hapus">✕</button>
+          </form>
+        </li>
+      <?php endfor; ?>
+    </ul>
+
+    <p class="info">
+      <?php if (count($tugas) === 0): ?>Belum ada tugas. Yuk tambah!
+      <?php elseif (count($hasil) === 0): ?>Tidak ada tugas yang cocok dengan "<?= htmlspecialchars($cari) ?>".
+      <?php else: ?>Menampilkan <?= count($hasil) ?> dari <?= count($tugas) ?> tugas · <?= $selesai ?> selesai
+      <?php endif; ?>
+    </p>
+  </div>
+</body>
+</html>
